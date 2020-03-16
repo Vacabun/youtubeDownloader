@@ -1,12 +1,20 @@
-import sys,os
+import sys,os,subprocess,threading,re
 from PyQt5.QtWidgets import (QDesktopWidget,QWidget, QPushButton, QApplication,QHBoxLayout, QVBoxLayout, QLabel, QInputDialog,QFileDialog,QMessageBox,QProgressDialog)
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QIcon
 
+formatlist = []
+containerlist =[]
+qualitylist = []
+sizelist = []
+downloadOptions=[]
 
 class MainWindow(QWidget):
+    systemRun = True
+    ProxyInfo = ''
     downloadURL = ''
-    saveAddress = ''
+    downloadindex = -1
+    saveAddress = 'c:\\'
     def __init__(self):
         super().__init__()
         self.Init_UI()
@@ -21,7 +29,7 @@ class MainWindow(QWidget):
         # step1
         self.step1TextLable1 = QLabel("step1:", self)
         self.step1Button = QPushButton('设置代理', self)
-        self.step1TextLable2 = QLabel("代理(不设置默认无代理):", self)
+        self.step1TextLable2 = QLabel("代理:"+self.ProxyInfo, self)
         self.step1VBox = QVBoxLayout()
         self.step1VBox.addWidget(self.step1TextLable1)
         self.step1VBox.addWidget(self.step1Button)
@@ -79,21 +87,58 @@ class MainWindow(QWidget):
         self.step5Button.clicked.connect(self.showDialog)
 
         self.setLayout(self.mainVBox)
-
         self.setWindowIcon(QIcon('download_128px.png'))
-
         self.show()
+
     def download(self):
-        cmd = f'you-get -o {self.saveAddress} {self.downloadURL}'
-        print(cmd)
+        self.step5TextLable2.setText('正在下载中，请稍后。')
+        cmd = f'you-get --format={formatlist[self.downloadindex]} -o {self.saveAddress} {self.downloadURL}'
+        #print(cmd)
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        output, errors = p.communicate()
+        output = output.decode('UTF-8')
+        self.step5TextLable2.setText('下载已完成。')
+
+    def getDoloadInfo(self):
+        self.step5TextLable2.setText('解析下载地址中，请稍后。')
+        cmd = f'you-get -i {self.downloadURL}'
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        output, errors = p.communicate()
+        output = output.decode('UTF-8')
+        pattern = re.compile(r'(- format[^#]*#{1})',re.M)  # 查找数字
+        result = pattern.findall(output)
+        formatlist.clear()
+        containerlist.clear()
+        qualitylist.clear()
+        sizelist.clear()
+        for match in result:
+            #解析format
+            format = re.compile(r'(format.*\r\n)',re.M).findall(match)[0]
+            format = re.sub(r'(\r\n)',r'',format)
+            format = re.sub(r'format:( )*', r'', str(format))
+            formatlist.append(format)
+            #解析container
+            container = re.compile(r'(container.*\r\n)', re.M).findall(match)[0]
+            container = re.sub(r'(\r\n)', r'', container)
+            container = re.sub(r'container:( )*', r'', container)
+            containerlist.append(container)
+            #解析quality
+            quality = re.compile(r'(quality.*\r\n)', re.M).findall(match)[0]
+            quality = re.sub(r'(\r\n)', r'', quality)
+            quality = re.sub(r'quality:( )*', r'', quality)
+            qualitylist.append(quality)
+            # 解析size byte
+            size = re.compile(r'\(.*\)', re.M).findall(match)[0]
+            size = re.sub(r'[^0123456789]','',size)
+            sizelist.append(size)
+        self.step5TextLable2.setText('解析下载地址完成。')
 
     def showDialog(self):
         sender = self.sender()
-        videoType = ['1080p','720p','480p']
         if sender == self.step1Button:
             text, ok = QInputDialog.getText(self, '设置代理', '请输入代理信息(如127.0.0.1:1080)：')
             if ok:
-                if(text == ""):
+                if(text.replace(' ','') == ""):
                     self.step1TextLable2.setText("无代理" + text)
                 else:
                     self.step1TextLable2.setText("设置代理:"+text)
@@ -101,39 +146,36 @@ class MainWindow(QWidget):
             self.downloadURL, ok = QInputDialog.getText(self, '输入下载链接', '下载链接:')
             if ok:
                 self.step2TextLable2.setText("下载链接:"+self.downloadURL)
+                thread = threading.Thread(target= self.getDoloadInfo)
+                thread.setDaemon(True)
+                thread.start()
+
         elif sender == self.step3Button:
-            if len(videoType):
-                text, ok = QInputDialog.getItem(self, '选择下载格式', '下载格式:',videoType)
-                if ok:
-                    self.step3TextLable2.setText("下载格式:" + str(text))
+            if(len(formatlist)):
+                downloadOptions.clear()
+                for i in range(len(formatlist)):
+                    downloadOptions.append(qualitylist[i]+' '+containerlist[i]+' '+sizelist[i]+'bytes')
+                if len(downloadOptions):
+                    text, ok = QInputDialog.getItem(self, '选择下载格式', '下载格式:',downloadOptions)
+                    if ok:
+                        self.step3TextLable2.setText("下载格式:" + text)
+                        self.downloadindex = downloadOptions.index(text)
+                        #print(self.downloadindex)
             else:
                 msgBox = QMessageBox()
                 msgBox.setWindowTitle('错误')
                 msgBox.setIcon(QMessageBox.Critical)
-                msgBox.setText("请输入下载地址")
+                msgBox.setText("请输入下载地址或等待下载地址解析完成.")
                 msgBox.setStandardButtons(QMessageBox.Ok)
                 msgBox.exec()
         elif sender == self.step4Button:
             self.saveAddress = QFileDialog.getExistingDirectory(self,"选择保存位置","C:/")
-            self.step4TextLable2.setText("保存位置:" + str(self.saveAddress))
+            self.step4TextLable2.setText("保存位置:" + self.saveAddress)
         elif sender == self.step5Button:
-            self.download()
-            num = 1000000
-            progress = QProgressDialog(self)
-            progress.setWindowTitle("请稍等")
-            progress.setLabelText("正在下载...")
-            progress.setCancelButtonText("取消")
-            progress.setMinimumDuration(5)
-            progress.setWindowModality(Qt.WindowModal)
-            progress.setRange(0, num)
-            for i in range(num):
-                progress.setValue(i)
-                if progress.wasCanceled():
-                    QMessageBox.warning(self,"提示","操作失败")
-                    break
-            else:
-                progress.setValue(num)
-                QMessageBox.information(self,"提示","操作成功")
+
+            thread = threading.Thread(target=self.download)
+            thread.setDaemon(True)
+            thread.start()
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
