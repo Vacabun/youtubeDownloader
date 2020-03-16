@@ -15,7 +15,7 @@ class MainWindow(QWidget):
         self.setWindowTitle('YouTube Downloader made by @Vacabun')
         self.setMinimumSize(520,400)
         size = self.geometry()
-        screen = QDesktopWidget().screenGeometry()
+        screen = QDesktopWidget().screenGeometry() 
         self.move((screen.width() - size.width()) / 2,
                   (screen.height() - size.height()) / 2)
         # step1
